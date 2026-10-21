@@ -1,11 +1,20 @@
 import streamlit as st
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from sklearn.metrics import confusion_matrix
+
+# Configuração inicial da página (deve ser a primeira chamada)
+st.set_page_config(
+    page_title="QualiUsinagem AI",
+    page_icon="⚙️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Mapeamento das classes
 CLASSES = {
@@ -14,7 +23,7 @@ CLASSES = {
     2: 'Refugo'
 }
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Treinando modelo de IA...")
 def load_data_and_train_model():
     # Geração de dados sintéticos (3 classes, 2 features)
     X, y = make_classification(
@@ -28,66 +37,75 @@ def load_data_and_train_model():
     )
     
     # Ajustando a escala das features para simular valores reais de usinagem
-    X[:, 0] = (X[:, 0] * 30) + 500  # Peso em gramas (média ~500g)
-    X[:, 1] = (X[:, 1] * 3) + 20    # Espessura em mm (média ~20mm)
+    peso = (X[:, 0] * 30) + 500       # Peso em gramas (média ~500g)
+    espessura = (X[:, 1] * 3) + 20    # Espessura em mm (média ~20mm)
+    
+    # Reconstruindo X com os valores escalados
+    X_scaled = np.column_stack((peso, espessura))
     
     # Divisão entre treino e teste
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
     
     # Treinamento do modelo SVM
-    model = SVC(kernel='rbf')
+    model = SVC(kernel='rbf', probability=True)
     model.fit(X_train, y_train)
     
     # Gerando predições e a matriz de confusão
     y_pred = model.predict(X_test)
     cm = confusion_matrix(y_test, y_pred)
     
-    return model, cm, X
-
-# Configuração da página
-st.set_page_config(page_title="Controle de Qualidade", layout="centered")
+    # Criando o DataFrame para exibição
+    df = pd.DataFrame(X_scaled, columns=['Peso (gramas)', 'Espessura (mm)'])
+    df['Classe_Num'] = y
+    df['Status'] = df['Classe_Num'].map(CLASSES)
+    
+    return model, cm, df
 
 # Carregamento do modelo e dados
-model, cm, X_data = load_data_and_train_model()
+model, cm, df_data = load_data_and_train_model()
 
-st.title("⚙️ Controle de Qualidade de Usinagem")
-st.write("Insira os dados da peça inspecionada para avaliação pelo modelo SVM.")
-
-# Interface para entrada de dados
-st.subheader("Parâmetros da Peça")
-peso_input = st.slider("Peso (gramas)", 
-                       min_value=float(np.min(X_data[:, 0]) - 50), 
-                       max_value=float(np.max(X_data[:, 0]) + 50), 
-                       value=500.0)
-
-espessura_input = st.slider("Espessura (mm)", 
-                            min_value=float(np.min(X_data[:, 1]) - 5), 
-                            max_value=float(np.max(X_data[:, 1]) + 5), 
-                            value=20.0)
-
-# Botão de avaliação
-if st.button("Avaliar Peça"):
-    # Realizando a predição com os dados do usuário
-    input_data = np.array([[peso_input, espessura_input]])
-    prediction = model.predict(input_data)[0]
-    resultado = CLASSES[prediction]
+# ==========================================
+# SIDEBAR (Menu Lateral - UX/UI)
+# ==========================================
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2043/2043064.png", width=60) # Ícone ilustrativo
+    st.title("Parâmetros de Inspeção")
+    st.write("Insira as medidas da peça para avaliação do modelo.")
     
-    # Exibição do resultado com cores correspondentes
-    if resultado == 'Aprovada':
-        st.success(f"**Resultado:** Peça {resultado} ✅")
-    elif resultado == 'Retrabalho':
-        st.warning(f"**Resultado:** Peça para {resultado} ⚠️")
-    else:
-        st.error(f"**Resultado:** Peça classificada como {resultado} ❌")
+    st.divider()
+    
+    peso_input = st.slider(
+        "Peso da peça (g):", 
+        min_value=float(df_data['Peso (gramas)'].min() - 20), 
+        max_value=float(df_data['Peso (gramas)'].max() + 20), 
+        value=500.0,
+        help="Deslize para selecionar o peso da peça em gramas."
+    )
+
+    espessura_input = st.slider(
+        "Espessura da peça (mm):", 
+        min_value=float(df_data['Espessura (mm)'].min() - 2), 
+        max_value=float(df_data['Espessura (mm)'].max() + 2), 
+        value=20.0,
+        help="Deslize para selecionar a espessura da peça em milímetros."
+    )
+    
+    st.divider()
+    avaliar_btn = st.button("🔍 Avaliar Peça", use_container_width=True, type="primary")
+
+# ==========================================
+# TELA PRINCIPAL
+# ==========================================
+st.title("⚙️ QualiUsinagem AI")
+st.markdown("App web que utiliza IA para controle de qualidade em usinagem, classificando peças em tempo real como aprovadas, retrabalho ou refugo.")
+
+# Espaço reservado para o resultado da avaliação
+resultado_placeholder = st.container()
 
 st.divider()
 
-# Exibição da Matriz de Confusão
-st.subheader("Desempenho do Modelo (Matriz de Confusão)")
-fig, ax = plt.subplots(figsize=(6, 4))
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-            xticklabels=CLASSES.values(), 
-            yticklabels=CLASSES.values(), ax=ax)
-ax.set_ylabel('Classe Real')
-ax.set_xlabel('Classe Predita')
-st.pyplot(fig)
+# Lógica de Avaliação (Disparada pelo botão no Sidebar)
+if avaliar_btn:
+    input_data = np.array([[peso_input, espessura_input]])
+    prediction = model.predict(input_data)[0]
+    resultado = CLASSES[prediction]
